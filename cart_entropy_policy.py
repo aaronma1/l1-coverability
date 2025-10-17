@@ -139,126 +139,6 @@ class CartEntropyPolicy(nn.Module):
         elif base_utils.args.env == "MountainCarContinuous-v0":
             return np.array(self.env.env.state)
 
-    #get initial state from a reset distribution. picks a uniform random policy from policies and rolls in for random number of steps
-    def init_state_reset(self,policies,T):
-        state = self.env.reset()
-        #pick a random policy
-        idx = np.random.randint(0,high=len(policies))
-        pi = policies[idx]
-        tau = np.random.randint(0,high=T)
-        #roll-in for tau steps
-        for i in range(tau):
-            action = pi.select_action(state)   
-            state, _, done, _ = self.env.step(action)
-            if done:
-                break 
-        return state
-
-    #learn a policy with from a specific reset distribution given by policies
-    def learn_policy_reset(self, policies, T, reward_fn, sa_reward=True, true_reward=False,
-        episodes=1000, train_steps=1000, start_steps=10000):
-
-        print('starting training in learn_policy_reset')
-        running_reward = 0
-        running_loss = 0
-        for i_episode in range(episodes):
-            state = self.init_state_reset(policies,T)
-            ep_reward = 0
-            finished = False
-            for t in range(train_steps):  # Don't infinite loop while learning
-                action = self.select_action(state)
-                if true_reward:
-                    state, reward, done, _ = self.env.step(action)                
-                else: 
-                    tmp = copy.deepcopy(base_utils.discretize_state(state))
-                    tmp.append(action[0])
-                    if sa_reward:
-                        reward = reward_fn[tuple(tmp)] #reward fn is a fn state-action pairs. applied before.
-                        state, _, done, _ = self.env.step(action)
-                    else:
-                        state, _, done, _ = self.env.step(action)
-                        reward = reward_fn[tuple(base_utils.discretize_state(state))] #reward fn is a fn of states. applied after.
-                    del tmp
-                ep_reward += reward
-                self.rewards.append(reward)
-                if done:
-                    state = self.init_state_reset(policies,T)
-
-            running_reward = running_reward * (1-0.05) + ep_reward * 0.05
-            if (i_episode == 0):
-                running_reward = ep_reward
-            
-            loss = self.update_policy()
-            running_loss = running_loss * (1-0.05) + loss*.05
-
-            # Log to console.
-            if (i_episode) % 100 == 0:
-                print('Episode {}\tEpisode reward: {:.2f}\tRunning reward: {:.2f}\tLoss: {:.2f}'.format(
-                    i_episode, ep_reward, running_reward, running_loss))
-
-        print('done training in learn_policy_reset')
-
-    def init_state_reset_random(self,T):
-        state = self.env.reset() 
-        #pick a random time index
-        tau = np.random.randint(0,high=T)
-        #roll-in with random policy for tau steps
-        for i in range(tau):
-            r = random.random()
-            action = -1
-            if (r < 1/3.):
-                action = 0
-            elif r < 2/3.:
-                action = 1
-            state, _, done, _ = self.env.step([action])
-            if done:
-                break 
-        return state
-
-    #learn a policy with rollins given by the uniformly random policy
-    def learn_policy_reset_random(self, T, reward_fn, sa_reward=True, true_reward=False,
-        episodes=1000, train_steps=1000, start_steps=10000):
-
-        print('starting training in learn_policy_reset_random')
-        running_reward = 0
-        running_loss = 0
-        for i_episode in range(episodes):
-            state = self.init_state_reset_random(T)
-            ep_reward = 0
-            finished = False
-            for t in range(train_steps):  # Don't infinite loop while learning
-                action = self.select_action(state) 
-                if true_reward:
-                    state, reward, done, _ = self.env.step(action)             
-                else: 
-                    tmp = copy.deepcopy(base_utils.discretize_state(state))
-                    tmp.append(action[0])
-                    if sa_reward:
-                        reward = reward_fn[tuple(tmp)] #reward fn is a fn state-action pairs. applied before.
-                        state, _, done, _ = self.env.step(action)
-                    else:
-                        state, _, done, _ = self.env.step(action)
-                        reward = reward_fn[tuple(base_utils.discretize_state(state))] #reward fn is a fn of states. applied after.
-                    del tmp
-                ep_reward += reward
-                self.rewards.append(reward)
-                if done:
-                    finished = True
-                    state = self.init_state_reset_random(T)
-
-            running_reward = running_reward * (1-0.05) + ep_reward * 0.05
-            if (i_episode == 0):
-                running_reward = ep_reward
-            loss = self.update_policy()
-            running_loss = running_loss * (1-.005) + loss*0.05
-
-            # Log to console.
-            if (i_episode) % 100 == 0:
-                print('Episode {}\tEpisode reward {:.2f}\tRunning reward: {:.2f}\tLoss: {:.2f}'.format(
-                    i_episode, ep_reward, running_reward, running_loss))
-
-        print('done training in learn_policy_reset random')
-
     def learn_policy(self, reward_fn, det_initial_state=False, sa_reward=True, true_reward=False,
         episodes=1000, train_steps=1000, 
         initial_state=[], start_steps=10000):
@@ -317,6 +197,10 @@ class CartEntropyPolicy(nn.Module):
         total_reward = 0.
         exited = False
 
+        count_sr = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
+        last_state = state
+
+
         for t in range(T):  
             p[tuple(base_utils.discretize_state(state))] += 1    
             action = self.select_action_no_grad(state)[0]
@@ -332,8 +216,15 @@ class CartEntropyPolicy(nn.Module):
                 else:
                     state, _, done, _ = env.step([action]) 
                     reward = reward_fn[tuple(base_utils.discretize_state(state))]  #reward fn is a fn of states. applied after update. 
-            del tmp
+
+            #compute sr
+            last_state_features = copy.deepcopy(base_utils.discretize_state(last_state))
+            count_sr[tuple(last_state_features) + tuple(tmp[:-2]) ] += 1
+            last_state = state
+
             total_reward += reward
+            del tmp
+            del last_state_features
             
             if done:
                 exited = True
@@ -343,38 +234,47 @@ class CartEntropyPolicy(nn.Module):
         env.close()
 
         if exited:
-            return p/float(final_t), p_sa/float(final_t), total_reward
+            return p/float(final_t), p_sa/float(final_t), total_reward, count_sr
         else:
-            return p/float(T), p_sa/float(T), total_reward
+            return p/float(T), p_sa/float(T), total_reward, count_sr
 
     #collect T rollouts from current policy
     def execute(self, T, reward_fn, sa_reward=True,true_reward=False,num_rollouts=1, initial_state=[], video_dir=''):
 
         p = np.zeros(shape=(tuple(base_utils.num_states)))
         p_sa = np.zeros(shape=(tuple(base_utils.num_sa)))
+
+    
+        p_pi = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
+        
+
         total_reward = 0.
 
         for r in range(num_rollouts):
             if len(initial_state) == 0:
                 initial_state = self.env.reset() # get random starting location
-
             else:
                 self.env.env.reset_state = initial_state 
                 state = self.env.reset()
                 state = self.get_obs()
 
-                p_int,p_sa_int,total_reward_int = self.execute_internal(self.env, T, reward_fn,sa_reward,true_reward,state)
+                p_int,p_sa_int,total_reward_int, p_pi_ep = self.execute_internal(self.env, T, reward_fn,sa_reward,true_reward,state)
                 p += p_int
                 p_sa += p_sa_int
+                p_pi += p_pi_ep 
                 total_reward += total_reward_int
 
-        return p/float(num_rollouts), p_sa/float(num_rollouts), total_reward/float(num_rollouts) 
+        return p/float(num_rollouts), p_sa/float(num_rollouts), total_reward/float(num_rollouts) , p_pi/ (T*num_rollouts)
 
     def execute_random_internal(self, env, T, reward_fn, state):
         p = np.zeros(shape=(tuple(base_utils.num_states)))
         p_sa = np.zeros(shape=(tuple(base_utils.num_sa)))
         total_reward = 0.
         exited = False
+
+
+        p_pi = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
+        last_state = state
 
         for t in range(T):  
             p[tuple(base_utils.discretize_state(state))] += 1
@@ -385,13 +285,21 @@ class CartEntropyPolicy(nn.Module):
             elif r < 2/3.:
                 action = 1
 
-            tmp = copy.deepcopy(base_utils.discretize_state(state))
-            tmp.append(action)
-            reward = reward_fn[tuple(tmp)] #reward fn is a fn state-action pairs
+            state_features = copy.deepcopy(base_utils.discretize_state(state))
+            state_features.append(action)
+            reward = reward_fn[tuple(state_features)] #reward fn is a fn state-action pairs
             total_reward += reward
-            p_sa[tuple(tmp)] +=1 
-            del tmp
+            p_sa[tuple(state_features)] +=1 
+
+            last_state_features = copy.deepcopy(base_utils.discretize_state(last_state))
+            p_pi[tuple(last_state_features) + tuple(state_features[:-2])] += 1
+            last_state = state
+
+            del state_features
+            del last_state_features
             state, _, done, _ = env.step([action])
+
+
 
             if done:
                 exited = True
@@ -400,14 +308,18 @@ class CartEntropyPolicy(nn.Module):
             
         env.close()
         if exited:
-            return p/float(final_t), p_sa/float(final_t), total_reward
+            return p/float(final_t), p_sa/float(final_t), total_reward, p_pi
         else:
-            return p/float(T), p_sa/float(T), total_reward
+            return p/float(T), p_sa/float(T), total_reward, p_pi
 
     def execute_random(self, T, reward_fn, num_rollouts=1, initial_state=[]):
         p = np.zeros(shape=(tuple(base_utils.num_states)))
         p_sa = np.zeros(shape=(tuple(base_utils.num_sa)))
         total_reward = 0.
+
+        
+
+        p_pi = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
 
         for r in range(num_rollouts):
             if len(initial_state) == 0:
@@ -418,12 +330,15 @@ class CartEntropyPolicy(nn.Module):
                 state = self.env.reset()
                 state = self.get_obs()
 
-                p_int, p_sa_int, total_reward_int = self.execute_random_internal(self.env, T, reward_fn, state)
+                p_int, p_sa_int, total_reward_int, sr_int = self.execute_random_internal(self.env, T, reward_fn, state)
                 p += p_int
                 p_sa += p_sa_int
                 total_reward += total_reward_int
 
-        return p/float(num_rollouts), p_sa/float(num_rollouts), total_reward/float(num_rollouts)
+                p_pi += sr_int
+
+
+        return p/float(num_rollouts), p_sa/float(num_rollouts), total_reward/float(num_rollouts), p_pi/(T*num_rollouts)
 
     def save(self, filename):
         self.env.close()

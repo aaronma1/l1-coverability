@@ -160,11 +160,11 @@ def collect_entropy_policies(env, epochs, T, MODEL_DIR, measurements='el'):
         zero_reward = np.zeros(shape=(tuple(base_utils.num_sa)))
 
         #estimate occupancy for random policy
-        p_baseline, p_sa_baseline, _  = cov_policy.execute_random(T, zero_reward, num_rollouts=args.num_rollouts, initial_state=initial_state) 
+        p_baseline, p_sa_baseline, _, sr_baseline  = cov_policy.execute_random(T, zero_reward, num_rollouts=args.num_rollouts, initial_state=initial_state) 
         #estimate occupancy for cov policy
-        new_cov_p, new_cov_psa, _ = cov_policy.execute(T, reward_fn=zero_reward, num_rollouts =args.num_rollouts, initial_state=initial_state)
+        new_cov_p, new_cov_psa, _, _ = cov_policy.execute(T, reward_fn=zero_reward, num_rollouts =args.num_rollouts, initial_state=initial_state)
         #estimate occupancy for ent policy 
-        new_ent_p, new_ent_psa, _ = ent_policy.execute(T, reward_fn=zero_reward, num_rollouts =args.num_rollouts,initial_state=initial_state)
+        new_ent_p, new_ent_psa, _, _ = ent_policy.execute(T, reward_fn=zero_reward, num_rollouts =args.num_rollouts,initial_state=initial_state)
             
         #this is the mixture occupancies for defining the reward functions
         cov_new_average_p = cov_new_average_p * (i)/float(i+1) + new_cov_p/float(i+1)
@@ -184,14 +184,14 @@ def collect_entropy_policies(env, epochs, T, MODEL_DIR, measurements='el'):
 
         #re-estimate the occupancy for every policy and average them. 
         for j in range(len(cov_policies)):
-            cov_eval_i_p, cov_eval_i_psa,_ = cov_policies[j].execute(T, reward_fn=zero_reward, num_rollouts =args.num_rollouts, initial_state=initial_state)
-            ent_eval_i_p, ent_eval_i_psa,_ = ent_policies[j].execute(T, reward_fn=zero_reward, num_rollouts =args.num_rollouts,initial_state=initial_state)
+            cov_eval_i_p, cov_eval_i_psa,_, _ = cov_policies[j].execute(T, reward_fn=zero_reward, num_rollouts =args.num_rollouts, initial_state=initial_state)
+            ent_eval_i_p, ent_eval_i_psa,_, _ = ent_policies[j].execute(T, reward_fn=zero_reward, num_rollouts =args.num_rollouts,initial_state=initial_state)
             cov_eval_average_p = cov_eval_average_p * (j)/float(j+1) + cov_eval_i_p/float(j+1)
             cov_eval_average_psa = cov_eval_average_psa * (j)/float(j+1) + cov_eval_i_psa/float(j+1)
             ent_eval_average_p = ent_eval_average_p * (j)/float(j+1) + ent_eval_i_p/float(j+1)
             ent_eval_average_psa = ent_eval_average_psa * (j)/float(j+1) + ent_eval_i_psa/float(j+1)
 
-        base_eval_average_p, base_eval_average_psa,_  = cov_policy.execute_random(T, zero_reward, num_rollouts=args.num_rollouts, initial_state=initial_state) 
+        base_eval_average_p, base_eval_average_psa,_, _  = cov_policy.execute_random(T, zero_reward, num_rollouts=args.num_rollouts, initial_state=initial_state) 
 
         #calculate the new entropy:
         if measure_entropy:
@@ -227,21 +227,21 @@ def collect_entropy_policies(env, epochs, T, MODEL_DIR, measurements='el'):
                     episodes=args.episodes, 
                     train_steps=args.train_steps)
             #what l1-cov reward does it get? 
-            _, _, ent_l1 = measurement_policy_ent.execute(T, l1_cov_reward_fn_ent, num_rollouts=args.num_rollouts, initial_state=initial_state)
+            _, _, ent_l1, _ = measurement_policy_ent.execute(T, l1_cov_reward_fn_ent, num_rollouts=args.num_rollouts, initial_state=initial_state)
 
             measurement_policy_cov = Policy(env, args.gamma, args.lr, base_utils.obs_dim, base_utils.action_dim) 
             measurement_policy_cov.learn_policy(l1_cov_reward_fn_cov, det_initial_state=False, sa_reward=True,
                 initial_state=initial_state, 
                 episodes=args.episodes, 
                 train_steps=args.train_steps)
-            _, _, cov_l1 = measurement_policy_cov.execute(T, l1_cov_reward_fn_cov,num_rollouts=args.num_rollouts, initial_state=initial_state)
+            _, _, cov_l1, _ = measurement_policy_cov.execute(T, l1_cov_reward_fn_cov,num_rollouts=args.num_rollouts, initial_state=initial_state)
 
             measurement_policy_base = Policy(env, args.gamma, args.lr, base_utils.obs_dim, base_utils.action_dim) 
             measurement_policy_base.learn_policy(l1_cov_reward_fn_base, det_initial_state=False, sa_reward=True,
                 initial_state=initial_state, 
                 episodes=args.episodes, 
                 train_steps=args.train_steps)
-            _, _, base_l1 = measurement_policy_base.execute(T, l1_cov_reward_fn_base,num_rollouts=args.num_rollouts, initial_state=initial_state)
+            _, _, base_l1, _ = measurement_policy_base.execute(T, l1_cov_reward_fn_base,num_rollouts=args.num_rollouts, initial_state=initial_state)
 
         else:
             cov_l1 = 0
