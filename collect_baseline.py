@@ -1,7 +1,7 @@
 import sys
 import os
 home_dir = os.getenv('HOME')
-sys.path = ['/Users/philipamortila/Documents/GitHub/coverability_experiments_final'+'/gym-fork'] + sys.path #change this to your local folder
+# sys.path = ['/home/aaron/Documents/l1-coverability'+'/gym-fork'] + sys.path #change this to your local folder
 
 import time
 from datetime import datetime
@@ -15,7 +15,8 @@ from scipy.interpolate import interp2d
 from scipy.interpolate import UnivariateSpline #changed this
 from scipy.stats import norm
 
-import gym
+# import gym
+import gymnasium as gym
 
 from cart_entropy_policy import CartEntropyPolicy
 import base_utils
@@ -115,7 +116,7 @@ def collect_entropy_policies(env, epochs, T, MODEL_DIR, measurements='el'):
         
     cov_policies = []
     ent_policies = []
-    initial_state = init_state(args.env)
+    initial_state = init_state(base_utils.get_env())
 
     cov_new_average_p = np.zeros(shape=(tuple(base_utils.num_states)))
     cov_new_average_psa = np.zeros(shape=(tuple(base_utils.num_sa)))

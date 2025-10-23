@@ -9,8 +9,8 @@ import torch.optim as optim
 from torch.distributions import Categorical
 from torch.distributions import Normal
 
-import gym
-from gym import wrappers
+import gymnasium as gym
+from gymnasium import wrappers
 import base_utils
 import copy
 
@@ -54,7 +54,7 @@ class CartEntropyPolicy(nn.Module):
         self.action_dim = action_dim
 
         self.init_state = np.array(init_state(base_utils.args.env))
-        self.env.seed(int(time.time())) # seed environment
+        # self.env.seed(int(time.time())) # seed environment
 
     def init(self, init_policy):
         print("init to policy")
@@ -125,19 +125,19 @@ class CartEntropyPolicy(nn.Module):
 
     def get_initial_state(self):
         if base_utils.args.env == "Pendulum-v0":
-            self.env.env.state = [np.pi, 0] 
-            theta, thetadot = self.env.env.state
+            self.env.unwrapped.state = [np.pi, 0] 
+            theta, thetadot = self.env.unwrapped.state
             return np.array([np.cos(theta), np.sin(theta), thetadot])
         elif base_utils.args.env == "MountainCarContinuous-v0":
-            self.env.env.state = [-0.50, 0]
-            return np.array(self.env.env.state)
+            self.env.unwrapped.state = [-0.50, 0]
+            return np.array(self.env.unwrapped.state)
 
     def get_obs(self):
         if base_utils.args.env == "Pendulum-v0":
-            theta, thetadot = self.env.env.state
+            theta, thetadot = self.env.unwrapped.state
             return np.array([np.cos(theta), np.sin(theta), thetadot])
         elif base_utils.args.env == "MountainCarContinuous-v0":
-            return np.array(self.env.env.state)
+            return np.array(self.env.unwrapped.state)
 
     def learn_policy(self, reward_fn, det_initial_state=False, sa_reward=True, true_reward=False,
         episodes=1000, train_steps=1000, 
@@ -150,7 +150,7 @@ class CartEntropyPolicy(nn.Module):
         running_loss = 0
         for i_episode in range(episodes):
             if det_initial_state:
-                self.env.env.reset_state = initial_state
+                self.env.unwrapped.reset_state = initial_state
             self.env.reset()
             state = self.get_obs()
             ep_reward = 0
@@ -172,7 +172,7 @@ class CartEntropyPolicy(nn.Module):
                 self.rewards.append(reward)
                 if done:
                     if det_initial_state:
-                        self.env.env.reset_state = initial_state
+                        self.env.unwrapped.reset_state = initial_state
                     self.env.reset()
                     state = self.get_obs()
 
@@ -254,7 +254,7 @@ class CartEntropyPolicy(nn.Module):
             if len(initial_state) == 0:
                 initial_state = self.env.reset() # get random starting location
             else:
-                self.env.env.reset_state = initial_state 
+                self.env.unwrapped.reset_state = initial_state 
                 state = self.env.reset()
                 state = self.get_obs()
 
@@ -273,7 +273,7 @@ class CartEntropyPolicy(nn.Module):
         exited = False
 
 
-        p_pi = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
+        transitions = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
         last_state = state
 
         for t in range(T):  
@@ -286,18 +286,22 @@ class CartEntropyPolicy(nn.Module):
                 action = 1
 
             state_features = copy.deepcopy(base_utils.discretize_state(state))
-            state_features.append(action)
-            reward = reward_fn[tuple(state_features)] #reward fn is a fn state-action pairs
+            reward = reward_fn[tuple(state_features) + (action,)] #reward fn is a fn state-action pairs
             total_reward += reward
-            p_sa[tuple(state_features)] +=1 
+            p_sa[tuple(state_features) + (action, )] +=1 
 
             last_state_features = copy.deepcopy(base_utils.discretize_state(last_state))
-            p_pi[tuple(last_state_features) + tuple(state_features[:-2])] += 1
+            transitions[tuple(last_state_features) + tuple(state_features)] += 1
             last_state = state
 
             del state_features
             del last_state_features
-            state, _, done, _ = env.step([action])
+
+            state, reward, terminated, truncated, info = self.env.step([action])
+
+            print(state, action)
+
+            done = terminated or truncated
 
 
 
@@ -306,39 +310,36 @@ class CartEntropyPolicy(nn.Module):
                 final_t = t + 1
                 break
             
-        env.close()
         if exited:
-            return p/float(final_t), p_sa/float(final_t), total_reward, p_pi
+            return p/float(final_t), p_sa/float(final_t), total_reward, transitions
         else:
-            return p/float(T), p_sa/float(T), total_reward, p_pi
+            return p/float(T), p_sa/float(T), total_reward, transitions
 
     def execute_random(self, T, reward_fn, num_rollouts=1, initial_state=[]):
         p = np.zeros(shape=(tuple(base_utils.num_states)))
         p_sa = np.zeros(shape=(tuple(base_utils.num_sa)))
         total_reward = 0.
 
-        
-
-        p_pi = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
+        transitions = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
 
         for r in range(num_rollouts):
             if len(initial_state) == 0:
                 initial_state = self.init_state
 
             else:
-                self.env.env.reset_state = initial_state 
+                self.env.unwrapped.reset_state = initial_state 
                 state = self.env.reset()
                 state = self.get_obs()
 
-                p_int, p_sa_int, total_reward_int, sr_int = self.execute_random_internal(self.env, T, reward_fn, state)
+                p_int, p_sa_int, total_reward_int, ep_transitions = self.execute_random_internal(self.env, T, reward_fn, state)
                 p += p_int
                 p_sa += p_sa_int
                 total_reward += total_reward_int
 
-                p_pi += sr_int
+                transitions += ep_transitions
 
 
-        return p/float(num_rollouts), p_sa/float(num_rollouts), total_reward/float(num_rollouts), p_pi/(T*num_rollouts)
+        return p/float(num_rollouts), p_sa/float(num_rollouts), total_reward/float(num_rollouts), transitions
 
     def save(self, filename):
         self.env.close()

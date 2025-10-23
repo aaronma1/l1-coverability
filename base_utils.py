@@ -18,7 +18,7 @@ parser.add_argument('--epochs', type=int, default=50, metavar='epo',
                     help='number of models to train on entropy rewards')
 parser.add_argument('--T', type=int, default=1000, metavar='T',
                     help='number of steps to roll out entropy policy')
-parser.add_argument('--env', type=str, default='fake', metavar='env',
+parser.add_argument('--env', type=str, default='MountainCarContinuous-v0', metavar='env',
                     help='the env to learn')
 parser.add_argument('--models_dir', type=str, default='/home/abby/entropy/data', metavar='N',
                     help='directory from which to load model policies')
@@ -53,12 +53,22 @@ parser.add_argument('--reg_eps', type=float, default=1e-4, help='the regularizat
 
 args = parser.parse_args()
 
+
+ENV = args.env
+
+if ENV == "fake":
+    ENV="MountainCarContinuous-v0"
+print(ENV)
+
 def get_args():
     return copy.deepcopy(args)
 
+def get_env():
+    return ENV
+
 # Env variables for MountainCarContinuous
-nx = 12
-nv = 11
+nx = 40
+nv = 40
 mc_obs_dim = 2
 mc_action_dim = 3
  
@@ -87,17 +97,17 @@ def discretize_value(value, bins):
 
 def get_state_bins():
     state_bins = []
-    if args.env == "HalfCheetah-v2":
+    if ENV == "HalfCheetah-v2":
         for i in range(cheetah_obs_dim):
             state_bins.append(discretize_range(-2, 2, cheetah_num_bins))
-    elif args.env == "MountainCarContinuous-v0":
+    elif ENV == "MountainCarContinuous-v0":
         state_bins = [
             # Cart position.
             discretize_range(-1.2, 0.6, nx), 
             # Cart velocity.
             discretize_range(-0.07, 0.07, nv)
         ]
-    elif args.env == "Pendulum-v0":
+    elif ENV == "Pendulum-v0":
         state_bins = [ # TODOTODO
             # Angles -- from 0 to 2pi?
             discretize_range(0, np.pi, pend_na), 
@@ -108,27 +118,27 @@ def get_state_bins():
     return state_bins
 
 def get_obs_dim():
-    if args.env == "HalfCheetah-v2":
+    if ENV == "HalfCheetah-v2":
         return cheetah_obs_dim
-    elif args.env == "MountainCarContinuous-v0":
+    elif ENV == "MountainCarContinuous-v0":
         return mc_obs_dim
-    elif args.env == "Pendulum-v0":
+    elif ENV == "Pendulum-v0":
         return pendulum_obs_dim
 
 def get_action_dim():
-    if args.env == "HalfCheetah-v2":
+    if ENV == "HalfCheetah-v2":
         return cheetah_action_dim
-    elif args.env == "MountainCarContinuous-v0":
+    elif ENV == "MountainCarContinuous-v0":
         return mc_action_dim
-    elif args.env == "Pendulum-v0":
+    elif ENV == "Pendulum-v0":
         return pendulum_action_dim
 
 def get_space_dim():
-    if args.env == "HalfCheetah-v2":
+    if ENV == "HalfCheetah-v2":
         return cheetah_space_dim
-    elif args.env == "MountainCarContinuous-v0":
+    elif ENV == "MountainCarContinuous-v0":
         return (nx, nv)
-    elif args.env == "Pendulum-v0":
+    elif ENV == "Pendulum-v0":
         return (pend_na, pend_nv)
 
 def get_num_states(obs_dim, state_bins):
@@ -136,14 +146,14 @@ def get_num_states(obs_dim, state_bins):
     for i in range(obs_dim):
         num_states.append(len(state_bins[i]) + 1)
 
-    if args.env == "HalfCheetah-v2":
+    if ENV == "HalfCheetah-v2":
         return num_states
-    elif args.env == "MountainCarContinuous-v0":
+    elif ENV == "MountainCarContinuous-v0":
         return num_states
-    elif args.env == "Pendulum-v0":
+    elif ENV == "Pendulum-v0":
         return (pend_na, pend_nv)
 
-if args.env != 'Ant-v2' and args.env != 'Humanoid-v2':
+if ENV != 'Ant-v2' and ENV != 'Humanoid-v2':
     action_dim = get_action_dim()
     obs_dim = get_obs_dim()
     state_bins = get_state_bins()
@@ -168,7 +178,7 @@ def pendulum_discretize_state(observation):
 # Discretize the observation features and reduce them to a single list.
 def discretize_state(observation):
 
-    if (args.env == "Pendulum-v0"):
+    if (ENV == "Pendulum-v0"):
         return pendulum_discretize_state(observation)
 
     state = []

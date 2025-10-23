@@ -6,4 +6,5 @@ __pycache__/
 *.pdf
 *.pyc
 .DS_Store
+out*/*
 
