@@ -156,18 +156,21 @@ class CartEntropyPolicy(nn.Module):
             ep_reward = 0
             for t in range(train_steps):  # Don't infinite loop while learning
                 action = self.select_action(state)
+                print(action)
                 if true_reward:
-                    state, reward, done, _ = self.env.step(action)
+                    state, reward, terminated, truncated, info = self.env.step(action)
+                    done = terminated or truncated
                 else:
-                    tmp = copy.deepcopy(base_utils.discretize_state(state))
-                    tmp.append(action[0])
+                    last_state_features = copy.deepcopy(base_utils.discretize_state(state))
+                    last_state_features.append(action[0])
                     if sa_reward:
-                        reward = reward_fn[tuple(tmp)] #reward fn is a fn state-action pairs. applied before.
-                        state, _, done, _ = self.env.step(action)
+                        reward = reward_fn[tuple(last_state_features)] #reward fn is a fn state-action pairs. applied before.
+                        state, _, terminated, truncated, info = self.env.step(action)
+                        done = terminated or truncated
                     else:
-                        state, _, done, _ = self.env.step(action)
+                        state, _, terminated, truncated, info = self.env.step(action)
                         reward = reward_fn[tuple(base_utils.discretize_state(state))] #reward fn is a fn of states. applied after.
-                    del tmp
+                    del last_state_features
                 ep_reward += reward
                 self.rewards.append(reward)
                 if done:
@@ -208,13 +211,16 @@ class CartEntropyPolicy(nn.Module):
             tmp.append(action)
             p_sa[tuple(tmp)] +=1 
             if true_reward:
-                state, reward, done, _ = env.step([action]) 
+                state, reward, terminated, truncated, info = self.env.step(action)
+                done = terminated or truncated
             else:
                 if sa_reward:
                     reward = reward_fn[tuple(tmp)] #reward fn is a fn state-action pairs. applied before.
-                    state, _, done, _ = env.step([action]) 
+                    state, _, terminated, truncated, info = self.env.step(action)
+                    done = terminated or truncated
                 else:
-                    state, _, done, _ = env.step([action]) 
+                    state, _, terminated, truncated, info = self.env.step(action)
+                    done = terminated or truncated
                     reward = reward_fn[tuple(base_utils.discretize_state(state))]  #reward fn is a fn of states. applied after update. 
 
             #compute sr
@@ -298,9 +304,6 @@ class CartEntropyPolicy(nn.Module):
             del last_state_features
 
             state, reward, terminated, truncated, info = self.env.step([action])
-
-            print(state, action)
-
             done = terminated or truncated
 
 

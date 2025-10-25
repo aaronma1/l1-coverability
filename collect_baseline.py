@@ -365,7 +365,7 @@ def main():
     if args.env == "Pendulum-v0":
         env.env.max_speed = 8
         env.env.max_torque = 1
-    env.seed(int(time.time())) # seed environment
+    # env.seed(int(time.time())) # seed environment
 
     TIME = datetime.now().strftime('%Y_%m_%d-%H-%M')
 
@@ -382,6 +382,7 @@ def main():
             metadata.write("state_bins: %s\n" % base_utils.state_bins)
 
     cov_policies, ent_policies = collect_entropy_policies(env, args.epochs, args.T, MODEL_DIR,args.measurements) 
+
     env.close()
 
     print("DONE")
