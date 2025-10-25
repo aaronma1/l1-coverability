@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-def plot_heatmap(mat, xlabel=None, ylabel=None, title=None, show_ticks=True, save_path=None):
+def plot_heatmap(mat, xlabel="x coordinate", ylabel="Velocity [-0.7, 0.7]", title=None, show_ticks=True, save_path=None):
     """
     Plot a 2D numpy array `mat` as a heatmap using matplotlib.
 
