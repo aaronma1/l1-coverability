@@ -156,7 +156,7 @@ class CartEntropyPolicy(nn.Module):
             ep_reward = 0
             for t in range(train_steps):  # Don't infinite loop while learning
                 action = self.select_action(state)
-                print(action)
+                done = False
                 if true_reward:
                     state, reward, terminated, truncated, info = self.env.step(action)
                     done = terminated or truncated
@@ -170,6 +170,7 @@ class CartEntropyPolicy(nn.Module):
                     else:
                         state, _, terminated, truncated, info = self.env.step(action)
                         reward = reward_fn[tuple(base_utils.discretize_state(state))] #reward fn is a fn of states. applied after.
+                        done = terminated or truncated
                     del last_state_features
                 ep_reward += reward
                 self.rewards.append(reward)
@@ -194,28 +195,29 @@ class CartEntropyPolicy(nn.Module):
                     i_episode, ep_reward, running_reward, running_loss))
 
     #collects one rollout of current policy, returns reward and occupancy data. trajectory is of length T (or termination, whichever comes first)
-    def execute_internal(self, env, T, reward_fn, sa_reward, true_reward, state):
+    def execute_internal(self, env, T, reward_fn, sa_reward, true_reward, init_state):
         p = np.zeros(shape=(tuple(base_utils.num_states)))
         p_sa = np.zeros(shape=(tuple(base_utils.num_sa)))
         total_reward = 0.
         exited = False
 
-        count_sr = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
-        last_state = state
-
+        transitions = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
+        state= init_state
+        last_state = init_state
 
         for t in range(T):  
             p[tuple(base_utils.discretize_state(state))] += 1    
-            action = self.select_action_no_grad(state)[0]
-            tmp = copy.deepcopy(base_utils.discretize_state(state))
-            tmp.append(action)
-            p_sa[tuple(tmp)] +=1 
+            action = [self.select_action_no_grad(state)[0]]
+            state_features = copy.deepcopy(base_utils.discretize_state(state))
+            state_features.append(action)
+            p_sa[tuple(state_features)] +=1 
+
             if true_reward:
                 state, reward, terminated, truncated, info = self.env.step(action)
                 done = terminated or truncated
             else:
                 if sa_reward:
-                    reward = reward_fn[tuple(tmp)] #reward fn is a fn state-action pairs. applied before.
+                    reward = reward_fn[tuple(state_features)] #reward fn is a fn state-action pairs. applied before.
                     state, _, terminated, truncated, info = self.env.step(action)
                     done = terminated or truncated
                 else:
@@ -225,11 +227,11 @@ class CartEntropyPolicy(nn.Module):
 
             #compute sr
             last_state_features = copy.deepcopy(base_utils.discretize_state(last_state))
-            count_sr[tuple(last_state_features) + tuple(tmp[:-2]) ] += 1
+            transitions[tuple(last_state_features) + tuple(state_features[:-2]) ] += 1
             last_state = state
 
             total_reward += reward
-            del tmp
+            del state_features
             del last_state_features
             
             if done:
@@ -240,9 +242,9 @@ class CartEntropyPolicy(nn.Module):
         env.close()
 
         if exited:
-            return p/float(final_t), p_sa/float(final_t), total_reward, count_sr
+            return p/float(final_t), p_sa/float(final_t), total_reward, transitions
         else:
-            return p/float(T), p_sa/float(T), total_reward, count_sr
+            return p/float(T), p_sa/float(T), total_reward, transitions
 
     #collect T rollouts from current policy
     def execute(self, T, reward_fn, sa_reward=True,true_reward=False,num_rollouts=1, initial_state=[], video_dir=''):
@@ -263,16 +265,19 @@ class CartEntropyPolicy(nn.Module):
                 self.env.unwrapped.reset_state = initial_state 
                 state = self.env.reset()
                 state = self.get_obs()
+                print("execute", state)
 
                 p_int,p_sa_int,total_reward_int, p_pi_ep = self.execute_internal(self.env, T, reward_fn,sa_reward,true_reward,state)
                 p += p_int
                 p_sa += p_sa_int
                 p_pi += p_pi_ep 
                 total_reward += total_reward_int
+            
+            print(p)
 
         return p/float(num_rollouts), p_sa/float(num_rollouts), total_reward/float(num_rollouts) , p_pi/ (T*num_rollouts)
 
-    def execute_random_internal(self, env, T, reward_fn, state):
+    def execute_random_internal(self, env, T, reward_fn, start_state):
         p = np.zeros(shape=(tuple(base_utils.num_states)))
         p_sa = np.zeros(shape=(tuple(base_utils.num_sa)))
         total_reward = 0.
@@ -280,9 +285,11 @@ class CartEntropyPolicy(nn.Module):
 
 
         transitions = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
-        last_state = state
-
+        last_state = start_state
+        state = start_state
         for t in range(T):  
+
+            ## ma 
             p[tuple(base_utils.discretize_state(state))] += 1
             r = random.random()
             action = -1
@@ -290,6 +297,8 @@ class CartEntropyPolicy(nn.Module):
                 action = 0
             elif r < 2/3.:
                 action = 1
+            state, reward, terminated, truncated, info = self.env.step([action])
+            done = terminated or truncated
 
             state_features = copy.deepcopy(base_utils.discretize_state(state))
             reward = reward_fn[tuple(state_features) + (action,)] #reward fn is a fn state-action pairs
@@ -298,15 +307,11 @@ class CartEntropyPolicy(nn.Module):
 
             last_state_features = copy.deepcopy(base_utils.discretize_state(last_state))
             transitions[tuple(last_state_features) + tuple(state_features)] += 1
-            last_state = state
 
             del state_features
             del last_state_features
 
-            state, reward, terminated, truncated, info = self.env.step([action])
-            done = terminated or truncated
-
-
+            last_state = state
 
             if done:
                 exited = True
@@ -326,20 +331,15 @@ class CartEntropyPolicy(nn.Module):
         transitions = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
 
         for r in range(num_rollouts):
-            if len(initial_state) == 0:
-                initial_state = self.init_state
+            self.env.reset()
+            state = self.get_obs()
 
-            else:
-                self.env.unwrapped.reset_state = initial_state 
-                state = self.env.reset()
-                state = self.get_obs()
+            p_int, p_sa_int, total_reward_int, ep_transitions = self.execute_random_internal(self.env, T, reward_fn, state)
+            p += p_int
+            p_sa += p_sa_int
+            total_reward += total_reward_int
 
-                p_int, p_sa_int, total_reward_int, ep_transitions = self.execute_random_internal(self.env, T, reward_fn, state)
-                p += p_int
-                p_sa += p_sa_int
-                total_reward += total_reward_int
-
-                transitions += ep_transitions
+            transitions += ep_transitions
 
 
         return p/float(num_rollouts), p_sa/float(num_rollouts), total_reward/float(num_rollouts), transitions

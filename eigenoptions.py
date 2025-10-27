@@ -92,17 +92,24 @@ def unflatten_idx(i):
 
 
 def compute_SR(transitions, gamma=0.99):
-    p_pi = np.zeros(shape=(tuple(base_utils.num_states) + tuple(base_utils.num_states)))
     size = base_utils.num_states[0] * base_utils.num_states[1]
-
-    # transitions = transitions.reshape(size, size)
     transitions = flatten_m(transitions)
-    transitions += transitions.T
+    transitions = transitions + transitions.T
+    p_pi = np.zeros(shape=(size, size))
+    plotlib.plot_heatmap(transitions, save_path="out1/transitions_random.png")
+    for i in range(size):
+        if np.sum(transitions[i, :]) != 0:
+            p_pi[i, :] = transitions[i, :]/np.sum(transitions[i,:])
+        else:
+            p_pi[i,i] = 1.0
 
-    row_sums = transitions.sum(axis=1, keepdims=True)
-    p_pi = np.divide(transitions, row_sums, where=row_sums!=0)
+    print(np.all(p_pi >= 0), np.all(p_pi <= 1))
 
     SR = np.linalg.inv(np.eye(size)-gamma*p_pi)
+    print(np.all(SR >= 0))
+
+    plotlib.plot_heatmap(SR, save_path="out1/sr_random.png")
+
     eigenvalues, eigenvectors = np.linalg.eig(SR)
 
     idx = np.argsort(eigenvalues.real)
@@ -115,26 +122,48 @@ def compute_SR(transitions, gamma=0.99):
 
 
 
-def rod_cycle(env, T, gamma=0.99, lr=1e-3, num_rollouts=10, epochs=10):
+def rod_cycle(env, T, gamma=0.99, lr=1e-3, num_rollouts=1, epochs=10):
     options = []
     zero_reward = np.zeros(shape=(tuple(base_utils.num_sa)))
 
 
     rand_policy = CartEntropyPolicy(env, gamma, lr, base_utils.obs_dim, base_utils.action_dim)
-    mu, _, _, transitions = rand_policy.execute_random(T, zero_reward, num_rollouts=num_rollouts, initial_state=[]) 
-
+    # mu, _, _, transitions = rand_policy.execute(T, zero_reward, sa_reward=False, num_rollouts=10)
+    mu, _, _, transitions = rand_policy.execute_random(1000, zero_reward, num_rollouts=20,  initial_state=[]) 
     SR, eigenvectors, eigenvalues = compute_SR(transitions, gamma)
+
+    plotlib.plot_heatmap(mu, save_path=f"out1/visitaion_random.png")
+
+    print(eigenvalues)
+    
 
     
 
+    for i in range(len(eigenvectors)):
+        print(eigenvalues[i])
 
-    # for i in range(len(eigenvalues)):
-    for i in range(10):
+        # if eigenvalues[i] != 1:
 
-        eig = eigenvectors[i]
-        reward = reward_shaping(eig)
-        option = CartEntropyPolicy(env, gamma, lr, base_utils.obs_dim, base_utils.action_dim)
-        # option.learn_policy()
+        eig = unflatten_state(eigenvectors[i])
+
+
+
+        plotlib.plot_heatmap(eig, save_path=f"out1/eigenvector{i}.png")
+
+
+            
+            # reward = reward_shaping(eig)
+            # option = CartEntropyPolicy(env, gamma, lr, base_utils.obs_dim, base_utils.action_dim)
+            # option.learn_policy(reward, sa_reward=False)
+
+            # mu, _, _, transitions = option.execute(T, eig, sa_reward=False, num_rollouts=10)
+            # print(mu)
+
+            # plotlib.plot_heatmap(mu, save_path=f"out1/eig{i}_visitation.png")
+            
+            # break
+        
+
 
 
 
@@ -161,7 +190,7 @@ if __name__ == "__main__":
     env = gym.make("MountainCarContinuous-v0", render_mode="rgb_array")
     # env.seed(int(time.time())) # seed environment
 
-    rod_cycle(env, 100,  gamma=0.99, lr=1e-3,)
+    rod_cycle(env, 1000,  gamma=0.99, lr=1e-3,)
 
 
     env.close()
