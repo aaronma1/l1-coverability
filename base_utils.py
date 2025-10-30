@@ -67,8 +67,8 @@ def get_env():
     return ENV
 
 # Env variables for MountainCarContinuous
-nx = 11
-nv = 12
+nx = 20
+nv = 20
 mc_obs_dim = 2
 mc_action_dim = 3
  

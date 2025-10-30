@@ -8,4 +8,6 @@ dependencies = [
     "gymnasium>=1.2.1",
     "matplotlib>=3.10.7",
     "numpy>=2.2.6",
+    "pylance>=0.38.3",
+    "scipy>=1.15.3",
 ]

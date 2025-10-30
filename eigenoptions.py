@@ -20,6 +20,7 @@ import gymnasium as gym
 from sympy import unflatten
 
 from cart_entropy_policy import CartEntropyPolicy
+from cart_entropy_policy1 import CartEntropyPolicy1
 import base_utils
 import plotting
 
@@ -79,9 +80,6 @@ def unflatten_state(state):
     return mat
 
 
-
-            
-
 def flatten_idx(x, v):
     return x + base_utils.num_states[0]*v 
 
@@ -91,26 +89,60 @@ def unflatten_idx(i):
 
 
 
+            
+
+def sr_from_transitions(transitions, gamma=0.99, disc_fn = base_utils.discretize_state, step_size=0.01):
+    a,b = base_utils.num_states
+    sr = np.zeros(shape=(a*b, a*b))
+    for trajectory in transitions:
+        for sars in trajectory:
+            # print(sars)
+            # print(disc_fn(sars[0]))
+
+            prev_s = flatten_idx(*disc_fn(sars[0]))
+            next_s = flatten_idx(*disc_fn(sars[3]))
+            for i in range(a * b):
+                delta =  gamma * sr[next_s, i] - sr[prev_s,i] + (1 if i == prev_s else 0)
+                sr[prev_s, i] += step_size * delta
+    return sr
+
+
+                
+                 
+
+
+
+
+
+
+                
+
+
+
+
+# OLD
 def compute_SR(transitions, gamma=0.99):
     size = base_utils.num_states[0] * base_utils.num_states[1]
     transitions = flatten_m(transitions)
+    plotlib.plot_heatmap(transitions, save_path="out1/transitions_random.png")
+
     transitions = transitions + transitions.T
     p_pi = np.zeros(shape=(size, size))
-    plotlib.plot_heatmap(transitions, save_path="out1/transitions_random.png")
     for i in range(size):
         if np.sum(transitions[i, :]) != 0:
             p_pi[i, :] = transitions[i, :]/np.sum(transitions[i,:])
         else:
             p_pi[i,i] = 1.0
 
-    print(np.all(p_pi >= 0), np.all(p_pi <= 1))
+    assert np.all(p_pi >= 0) and np.all(p_pi <= 1)
 
     SR = np.linalg.inv(np.eye(size)-gamma*p_pi)
-    print(np.all(SR >= 0))
+    assert np.all(SR >= 0)
 
     plotlib.plot_heatmap(SR, save_path="out1/sr_random.png")
 
     eigenvalues, eigenvectors = np.linalg.eig(SR)
+    print("eigenvalues", eigenvalues)
 
     idx = np.argsort(eigenvalues.real)
     eigenvalues = np.real_if_close(eigenvalues, tol=1e5)[idx]
@@ -119,51 +151,72 @@ def compute_SR(transitions, gamma=0.99):
     return SR, eigenvectors, eigenvalues
 
 
+def p_from_transitions(transitions, disc_fn = base_utils.discretize_state):
+    p = np.zeros(shape=base_utils.num_states)
+    print(p.shape)
+    
+    for trajectory in transitions:
+        p[tuple(disc_fn(trajectory[0][0]))] += 1 # add init state 
+        for sars in trajectory:
+            p[tuple(disc_fn(sars[3]))] += 1
+    return p/np.sum(p)
 
 
 
-def rod_cycle(env, T, gamma=0.99, lr=1e-3, num_rollouts=1, epochs=10):
+
+def rod_cycle(env, T, gamma=0.99, lr=1e-3, num_rollouts=100, epochs=10):
     options = []
     zero_reward = np.zeros(shape=(tuple(base_utils.num_sa)))
 
 
-    rand_policy = CartEntropyPolicy(env, gamma, lr, base_utils.obs_dim, base_utils.action_dim)
-    # mu, _, _, transitions = rand_policy.execute(T, zero_reward, sa_reward=False, num_rollouts=10)
-    mu, _, _, transitions = rand_policy.execute_random(1000, zero_reward, num_rollouts=20,  initial_state=[]) 
-    SR, eigenvectors, eigenvalues = compute_SR(transitions, gamma)
+    rand_policy = CartEntropyPolicy1(env, gamma, lr, base_utils.obs_dim, base_utils.action_dim)
+    transitions = rand_policy.execute_random(1000, zero_reward, num_rollouts=num_rollouts,  initial_state=[]) 
 
+    mu = p_from_transitions(transitions)
+    SR = sr_from_transitions(transitions, gamma)
+
+    SR += SR.T
+    plotlib.plot_heatmap(SR, save_path="out1/sr_random.png")
     plotlib.plot_heatmap(mu, save_path=f"out1/visitaion_random.png")
 
-    print(eigenvalues)
+    eigenvalues, eigenvectors = np.linalg.eig(SR)
+
+    idx = np.argsort(-eigenvalues.real)
+    print(idx)
+    eigenvalues = np.real_if_close(eigenvalues, tol=1e5)[idx]
+    eigenvectors = np.real_if_close(eigenvectors, tol=1e5)[:, idx]
+
+    print("eigenvalues", eigenvalues)
     
 
+    mu_opt = copy.deepcopy(mu)/11    
     
 
-    for i in range(len(eigenvectors)):
+    for i in range(10):
+
         print(eigenvalues[i])
+        eig = unflatten_state(eigenvectors[:, i])
 
-        # if eigenvalues[i] != 1:
-
-        eig = unflatten_state(eigenvectors[i])
-
-
-
+        #chose the eigenvector that overlaps the state space less
+        if np.dot(eigenvectors[:, i], flatten_state(mu)) > 0:
+            eig = -eig
         plotlib.plot_heatmap(eig, save_path=f"out1/eigenvector{i}.png")
-
-
             
-            # reward = reward_shaping(eig)
-            # option = CartEntropyPolicy(env, gamma, lr, base_utils.obs_dim, base_utils.action_dim)
-            # option.learn_policy(reward, sa_reward=False)
+        reward = reward_shaping(eig)
+        option = CartEntropyPolicy1(env, gamma, lr, base_utils.obs_dim, base_utils.action_dim)
+        option.learn_policy(reward, sa_reward=False)
 
-            # mu, _, _, transitions = option.execute(T, eig, sa_reward=False, num_rollouts=10)
-            # print(mu)
+        transitions = option.execute(T, eig, sa_reward=False, num_rollouts=num_rollouts)
+        mu = p_from_transitions(transitions)
+        plotlib.plot_heatmap(mu, f"out1/eigenvector{i}-visitation.png")
 
-            # plotlib.plot_heatmap(mu, save_path=f"out1/eig{i}_visitation.png")
-            
-            # break
+        mu_opt += mu/11
+    
+    plotlib.plot_heatmap(mu_opt, "visitation-top10-eigen.png")
+
+    
+
         
-
 
 
 

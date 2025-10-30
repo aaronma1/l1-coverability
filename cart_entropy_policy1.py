@@ -30,9 +30,9 @@ def get_obs(state):
     elif base_utils.args.env == "MountainCarContinuous-v0":
         return np.array(state)
 
-class CartEntropyPolicy(nn.Module):
+class CartEntropyPolicy1(nn.Module):
     def __init__(self, env, gamma, lr, obs_dim, action_dim):
-        super(CartEntropyPolicy, self).__init__()
+        super(CartEntropyPolicy1, self).__init__()
 
         self.affine1 = nn.Linear(obs_dim, 128)
         self.middle = nn.Linear(128, 128)
@@ -196,151 +196,128 @@ class CartEntropyPolicy(nn.Module):
 
     #collects one rollout of current policy, returns reward and occupancy data. trajectory is of length T (or termination, whichever comes first)
     def execute_internal(self, env, T, reward_fn, sa_reward, true_reward, init_state):
-        p = np.zeros(shape=(tuple(base_utils.num_states)))
-        p_sa = np.zeros(shape=(tuple(base_utils.num_sa)))
-        total_reward = 0.
-        exited = False
+        transitions = []
 
-        transitions = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
-        state= init_state
-        last_state = init_state
+        state = init_state
+        last_state = init_state 
 
         for t in range(T):  
-            p[tuple(base_utils.discretize_state(state))] += 1    
+            # select action
             action = [self.select_action_no_grad(state)[0]]
-            state_features = copy.deepcopy(base_utils.discretize_state(state))
-            state_features.append(action)
-            p_sa[tuple(state_features)] +=1 
 
-            if true_reward:
-                state, reward, terminated, truncated, info = self.env.step(action)
-                done = terminated or truncated
-            else:
+            # sa reward
+            state, reward, terminated, truncated, info = self.env.step(action)
+            if not true_reward:
+                state_features = copy.deepcopy(base_utils.discretize_state(state))
                 if sa_reward:
-                    reward = reward_fn[tuple(state_features)] #reward fn is a fn state-action pairs. applied before.
-                    state, _, terminated, truncated, info = self.env.step(action)
-                    done = terminated or truncated
+                    reward = reward_fn[tuple(state_features) + tuple(action)]  #reward fn is a fn of states. applied after update. 
                 else:
-                    state, _, terminated, truncated, info = self.env.step(action)
-                    done = terminated or truncated
-                    reward = reward_fn[tuple(base_utils.discretize_state(state))]  #reward fn is a fn of states. applied after update. 
-
-            #compute sr
-            last_state_features = copy.deepcopy(base_utils.discretize_state(last_state))
-            transitions[tuple(last_state_features) + tuple(state_features[:-2]) ] += 1
+                    reward = reward_fn[tuple(state_features)]
+                del state_features
+            done = terminated or truncated
+                
+            transitions.append([copy.deepcopy(last_state), copy.deepcopy(action), copy.deepcopy(reward), copy.deepcopy(state)])
             last_state = state
-
-            total_reward += reward
-            del state_features
-            del last_state_features
             
             if done:
                 exited = True
                 final_t = t + 1
                 break
-
         env.close()
 
-        if exited:
-            return p/float(final_t), p_sa/float(final_t), total_reward, transitions
-        else:
-            return p/float(T), p_sa/float(T), total_reward, transitions
+        return transitions
+
+    def p_from_transitions(transitions, disc_fn = base_utils.discretize_state):
+        p = np.zeros(shape=base_utils.num_states)
+        
+        for trajectory in transitions:
+
+            print(disc_fn(trajectory[0][0]))
+
+            p[disc_fn(trajectory[0][0])] += 1 # add init state 
+            for sars in trajectory:
+                p[disc_fn(sars[3])] += 1
+        return p/np.sum(p)
+    
+
 
     #collect T rollouts from current policy
     def execute(self, T, reward_fn, sa_reward=True,true_reward=False,num_rollouts=1, initial_state=[], video_dir=''):
-
-        p = np.zeros(shape=(tuple(base_utils.num_states)))
-        p_sa = np.zeros(shape=(tuple(base_utils.num_sa)))
-
-    
-        p_pi = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
-        
-
-        total_reward = 0.
+        transitions = []
 
         for r in range(num_rollouts):
             if len(initial_state) == 0:
                 initial_state = self.env.reset() # get random starting location
             else:
                 self.env.unwrapped.reset_state = initial_state 
-                state = self.env.reset()
+                self.env.reset()
                 state = self.get_obs()
+                transitions.append(self.execute_internal(self.env,T, reward_fn,sa_reward,true_reward,state))
+        return transitions
 
-                p_int,p_sa_int,total_reward_int, p_pi_ep = self.execute_internal(self.env, T, reward_fn,sa_reward,true_reward,state)
-                p += p_int
-                p_sa += p_sa_int
-                p_pi += p_pi_ep 
-                total_reward += total_reward_int
-            
-        return p/float(num_rollouts), p_sa/float(num_rollouts), total_reward/float(num_rollouts) , p_pi/ (T*num_rollouts)
+    def execute_random_internal(self, env, T,reward_fn, start_state, true_reward=False, sa_reward=False):
+        transitions = []
 
-    def execute_random_internal(self, env, T, reward_fn, start_state):
-        p = np.zeros(shape=(tuple(base_utils.num_states)))
-        p_sa = np.zeros(shape=(tuple(base_utils.num_sa)))
-        total_reward = 0.
-        exited = False
-
-
-        transitions = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
-        last_state = start_state
         state = start_state
+        last_state = start_state 
+
         for t in range(T):  
 
-            ## ma 
-            p[tuple(base_utils.discretize_state(state))] += 1
+            # select action
             r = random.random()
-            action = -1
+            action = [-1]
             if (r < 1/3.):
-                action = 0
+                action = [0]
             elif r < 2/3.:
-                action = 1
-            state, reward, terminated, truncated, info = self.env.step([action])
+                action = [1]
+
+            # env step, 
+            state, reward, terminated, truncated, info = self.env.step(action)
+            if not true_reward:
+                state_features = copy.deepcopy(base_utils.discretize_state(state))
+                if sa_reward:
+                    reward = reward_fn[tuple(state_features) + tuple(action)]  #reward fn is a fn of states. applied after update. 
+                else:
+                    reward = reward_fn[tuple(state_features)]
+                del state_features
             done = terminated or truncated
 
-            state_features = copy.deepcopy(base_utils.discretize_state(state))
-            reward = reward_fn[tuple(state_features) + (action,)] #reward fn is a fn state-action pairs
-            total_reward += reward
-            p_sa[tuple(state_features) + (action, )] +=1 
-
-            last_state_features = copy.deepcopy(base_utils.discretize_state(last_state))
-            transitions[tuple(last_state_features) + tuple(state_features)] += 1
-
-            del state_features
-            del last_state_features
-
+            transitions.append([copy.deepcopy(last_state), copy.deepcopy(action), copy.deepcopy(reward), copy.deepcopy(state)])
             last_state = state
-
+            
             if done:
                 exited = True
                 final_t = t + 1
                 break
-            
-        if exited:
-            return p/float(final_t), p_sa/float(final_t), total_reward, transitions
-        else:
-            return p/float(T), p_sa/float(T), total_reward, transitions
+        env.close()
 
-    def execute_random(self, T, reward_fn, num_rollouts=1, initial_state=[]):
-        p = np.zeros(shape=(tuple(base_utils.num_states)))
-        p_sa = np.zeros(shape=(tuple(base_utils.num_sa)))
-        total_reward = 0.
+        return transitions
 
-        transitions = np.zeros(shape=(tuple(base_utils.num_states + base_utils.num_states)))
 
+    #collect T rollouts from current policy
+
+    def execute_random(self, T, reward_fn, num_rollouts=1, initial_state=[], true_reward=False, sa_reward=False):
+        transitions = []
         for r in range(num_rollouts):
             self.env.reset()
             state = self.get_obs()
-
-            p_int, p_sa_int, total_reward_int, ep_transitions = self.execute_random_internal(self.env, T, reward_fn, state)
-            p += p_int
-            p_sa += p_sa_int
-            total_reward += total_reward_int
-
-            transitions += ep_transitions
-
-
-        return p/float(num_rollouts), p_sa/float(num_rollouts), total_reward/float(num_rollouts), transitions
+            transitions.append(self.execute_random_internal(self.env, T, reward_fn, state))
+        return transitions
 
     def save(self, filename):
         self.env.close()
         torch.save(self, filename)
+
+if __name__ == "__main__":
+    # Suppress scientific notation.
+    np.set_printoptions(suppress=True, edgeitems=100)
+    np.set_printoptions(precision=3, suppress=True)
+
+    env = "MountainCarContinuous-v0"
+    # Make environment.
+    env = gym.make("MountainCarContinuous-v0", render_mode="rgb_array")
+    # env.seed(int(time.time())) # seed environment
+
+    zero_reward = np.zeros(shape=(tuple(base_utils.num_sa)))
+    rand_policy = CartEntropyPolicy(env, 0.99, 1e-3, base_utils.obs_dim, base_utils.action_dim)
+    transitions = rand_policy.execute_random(1000, zero_reward, num_rollouts=10,  initial_state=[]) 

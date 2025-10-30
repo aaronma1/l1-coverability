@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-def plot_heatmap(mat, xlabel="x coordinate", ylabel="Velocity [-0.7, 0.7]", title=None, show_ticks=True, save_path=None):
+def plot_heatmap(mat, xlabel="x coordinate", ylabel="Velocity [-0.7, 0.7]", title=None, show_ticks=True, save_path=None, cmap="turbo"):
     """
     Plot a 2D numpy array `mat` as a heatmap using matplotlib.
 
@@ -17,7 +17,7 @@ def plot_heatmap(mat, xlabel="x coordinate", ylabel="Velocity [-0.7, 0.7]", titl
         raise ValueError(f"Input must be a 2D array/matrix. Got ndim={mat.ndim}")
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    im = ax.imshow(mat, aspect='auto', interpolation='nearest')
+    im = ax.imshow(mat, aspect='auto', interpolation='nearest', cmap=cmap)
     cbar = fig.colorbar(im, ax=ax)
 
     if xlabel:
