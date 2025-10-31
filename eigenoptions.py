@@ -140,10 +140,7 @@ def compute_SR(transitions, gamma=0.99):
     assert np.all(SR >= 0)
 
     plotlib.plot_heatmap(SR, save_path="out1/sr_random.png")
-
     eigenvalues, eigenvectors = np.linalg.eig(SR)
-    print("eigenvalues", eigenvalues)
-
     idx = np.argsort(eigenvalues.real)
     eigenvalues = np.real_if_close(eigenvalues, tol=1e5)[idx]
     eigenvectors = np.real_if_close(eigenvectors, tol=1e5)[:, idx]
@@ -153,8 +150,6 @@ def compute_SR(transitions, gamma=0.99):
 
 def p_from_transitions(transitions, disc_fn = base_utils.discretize_state):
     p = np.zeros(shape=base_utils.num_states)
-    print(p.shape)
-    
     for trajectory in transitions:
         p[tuple(disc_fn(trajectory[0][0]))] += 1 # add init state 
         for sars in trajectory:
@@ -164,55 +159,65 @@ def p_from_transitions(transitions, disc_fn = base_utils.discretize_state):
 
 
 
-def rod_cycle(env, T, gamma=0.99, lr=1e-3, num_rollouts=100, epochs=10):
+def rod_cycle(env, T, gamma=0.99, lr=1e-3, num_rollouts=10, epochs=10):
     options = []
     zero_reward = np.zeros(shape=(tuple(base_utils.num_sa)))
 
 
+    # step 0 collect random walk transitions
     rand_policy = CartEntropyPolicy1(env, gamma, lr, base_utils.obs_dim, base_utils.action_dim)
     transitions = rand_policy.execute_random(1000, zero_reward, num_rollouts=num_rollouts,  initial_state=[]) 
-
     mu = p_from_transitions(transitions)
     SR = sr_from_transitions(transitions, gamma)
-
     SR += SR.T
-    plotlib.plot_heatmap(SR, save_path="out1/sr_random.png")
-    plotlib.plot_heatmap(mu, save_path=f"out1/visitaion_random.png")
-
     eigenvalues, eigenvectors = np.linalg.eig(SR)
-
     idx = np.argsort(-eigenvalues.real)
-    print(idx)
     eigenvalues = np.real_if_close(eigenvalues, tol=1e5)[idx]
     eigenvectors = np.real_if_close(eigenvectors, tol=1e5)[:, idx]
+    plotlib.plot_heatmap(SR, save_path=f"out1/random_SR.png")
+    plotlib.plot_heatmap(mu, save_path=f"out1/random_mu.png")
 
-    print("eigenvalues", eigenvalues)
-    
+    all_transitions = transitions
 
-    mu_opt = copy.deepcopy(mu)/11    
-    
 
-    for i in range(10):
 
-        print(eigenvalues[i])
-        eig = unflatten_state(eigenvectors[:, i])
+    for epoch in range(epochs):
 
-        #chose the eigenvector that overlaps the state space less
-        if np.dot(eigenvectors[:, i], flatten_state(mu)) > 0:
-            eig = -eig
-        plotlib.plot_heatmap(eig, save_path=f"out1/eigenvector{i}.png")
-            
-        reward = reward_shaping(eig)
-        option = CartEntropyPolicy1(env, gamma, lr, base_utils.obs_dim, base_utils.action_dim)
-        option.learn_policy(reward, sa_reward=False)
 
-        transitions = option.execute(T, eig, sa_reward=False, num_rollouts=num_rollouts)
-        mu = p_from_transitions(transitions)
-        plotlib.plot_heatmap(mu, f"out1/eigenvector{i}-visitation.png")
+        for i in range(3):
+            # get eigenvector and use it to learn an option
+            eig = unflatten_state(eigenvectors[:, i])
+            if np.dot(eigenvectors[:, i], flatten_state(mu)) > 0:
+                eig = -eig
+            reward = reward_shaping(eig)
+            option = CartEntropyPolicy1(env, gamma, lr, base_utils.obs_dim, base_utils.action_dim)
+            option.learn_policy(reward, sa_reward=False)
 
-        mu_opt += mu/11
-    
-    plotlib.plot_heatmap(mu_opt, "visitation-top10-eigen.png")
+            # collect rollouts from option
+            transitions = option.execute(T, eig, sa_reward=False, num_rollouts=num_rollouts)
+            mu = p_from_transitions(transitions)
+            # plot  
+            plotlib.plot_heatmap(reward, save_path=f"out1/epoch{epoch}_eigenvector{i}.png")
+            plotlib.plot_heatmap(mu, save_path=f"out1/{epoch}eigenvector{i}-visitation.png")
+
+            all_transitions += transitions
+
+        # after each iteration, recompute sr, eigenvectors, and eigenvalues
+        SR = sr_from_transitions(all_transitions)
+        eigenvalues, eigenvectors = np.linalg.eig(SR)
+        idx = np.argsort(-eigenvalues.real)
+        eigenvalues = np.real_if_close(eigenvalues, tol=1e5)[idx]
+        eigenvectors = np.real_if_close(eigenvectors, tol=1e5)[:, idx]
+        plotlib.plot_heatmap(p_from_transitions(all_transitions), save_path=f"out1/{epoch}_visitation.png")
+        plotlib.plot_heatmap(SR, save_path=f"out1/epoch{epoch}_sr.png")
+        SR = sr_from_transitions(all_transitions)
+        SR += SR.T
+        eigenvalues, eigenvectors = np.linalg.eig(SR)
+        idx = np.argsort(-eigenvalues.real)
+        eigenvalues = np.real_if_close(eigenvalues, tol=1e5)[idx]
+        eigenvectors = np.real_if_close(eigenvectors, tol=1e5)[:, idx]
+
+        
 
     
 

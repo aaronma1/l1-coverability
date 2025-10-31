@@ -33,10 +33,13 @@ def get_obs(state):
 class CartEntropyPolicy1(nn.Module):
     def __init__(self, env, gamma, lr, obs_dim, action_dim):
         super(CartEntropyPolicy1, self).__init__()
+        self.device = "cuda"
 
-        self.affine1 = nn.Linear(obs_dim, 128)
-        self.middle = nn.Linear(128, 128)
-        self.affine2 = nn.Linear(128, action_dim)
+        hidden_dim=16
+
+        self.affine1 = nn.Linear(obs_dim, hidden_dim, device=self.device)
+        self.middle = nn.Linear(hidden_dim, hidden_dim, device=self.device)
+        self.affine2 = nn.Linear(hidden_dim, action_dim, device=self.device)
 
         torch.nn.init.xavier_uniform_(self.affine1.weight)
         torch.nn.init.xavier_uniform_(self.middle.weight)
@@ -61,6 +64,7 @@ class CartEntropyPolicy1(nn.Module):
         self.load_state_dict(init_policy.state_dict())
 
     def forward(self, x):
+        x = x.to(self.device)
         x = F.relu(self.affine1(x))
         x = F.relu(self.middle(x))
         action_scores = self.affine2(x)
